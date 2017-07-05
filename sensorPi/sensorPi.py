@@ -15,8 +15,9 @@ import sht30.i2c as SHT30
 import adxl345.i2c as ADXL
 import logging
 import RPi.GPIO as GPIO
+import argparse
 
-MQTT_PUBLISH_PERIOD = 0.1
+MQTT_PUBLISH_PERIOD = 2
 global timer_publish_triggered
 timer_publish_triggered = 0
 global server_connected
@@ -56,7 +57,7 @@ def sensor_loop():
     global timer_publish_triggered
     global server_connected
     timer_publish_trigger()
-    COUNT_PER_1S = 10
+    COUNT_PER_1S = 1
     count_for_1s = 0
     # adxl.flash_fifo()
     print "sending %d" % server_connected
@@ -65,14 +66,18 @@ def sensor_loop():
             timer_publish_triggered = 0
             count_for_1s = count_for_1s + 1
             # every 1.0 s
-            if count_for_1s == COUNT_PER_1S:
+            if count_for_1s >= COUNT_PER_1S:
                 count_for_1s = 0
                 # upload sht             
                 try:
                     temp,humid,timestamp = sht30.read_periodic()
+                    # print (temp,humid,timestamp)
                     if timestamp !=0:
                         payload = '{"mac":"%s","ts":%d,"c_temp":%.2f,"c_humid":%.2f}' % (mac,timestamp,temp,humid);
                         client.publish("tddt/rpi/rpi-001/s_temp_humid",payload)
+                        # print payload
+                    else:
+                        logging.error("no sht3x data")
                 except Exception, e:
                     print e
                     logging.error(e)
@@ -102,7 +107,18 @@ def sensor_loop():
 
 
 if __name__ == "__main__":
-    logging.basicConfig(filename='mqtt-bridge.log',level=logging.DEBUG,format='%(asctime)s  %(message)s')
+    
+    # arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--host', type=str, default="localhost")
+    parser.add_argument('--port', type=int, default=1883)
+    parser.add_argument('--username', type=str, default=None)
+    parser.add_argument('--password', type=str, default=None)
+    args = parser.parse_args()
+
+    logging.basicConfig(filename='sensorPi_internal.log',level=logging.DEBUG,format='%(asctime)s  %(message)s')
+    
+    logging.info(args)
 
     sht30 = SHT30.Sht30()
     sht30.enable_periodic_measurement()
@@ -110,7 +126,6 @@ if __name__ == "__main__":
     # adxl.init()
 
     GPIO.setmode(GPIO.BOARD)
-    GPIO.setup(11,GPIO.OUT)
     GPIO.setup(12,GPIO.IN)
 
     mac=uuid.UUID(int = uuid.getnode()).hex[-12:]
@@ -119,6 +134,8 @@ if __name__ == "__main__":
     client = mqtt.Client()
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
+    if args.username != None:
+        client.username_pw_set(args.username, args.password)
     client.loop_start()
 
     # if len(sys.argv) > 1:
@@ -132,7 +149,7 @@ if __name__ == "__main__":
         try:
             print "try connecting..."
             logging.info("Try connecting to server...")
-            client.connect("newdream.ren", 1883, 10)
+            client.connect(args.host, args.port, 10)            
             # client.loop_start()
             time.sleep(2)
             sensor_loop()
