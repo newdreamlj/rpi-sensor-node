@@ -1,0 +1,4 @@
+## use Raspberry Pi as a Sensor Node
+
+- overall solution in sensorPi
+- standalone module test exists in seperate directories, such as gpio,i2c
