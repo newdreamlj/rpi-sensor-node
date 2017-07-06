@@ -22,6 +22,8 @@ global timer_publish_triggered
 timer_publish_triggered = 0
 global server_connected
 server_connected = 0
+global pub_pending_times
+pub_pending_times = 0
 
 
 def on_connect(client, userdata, rc):
@@ -47,6 +49,11 @@ def on_disconnect(client, obj, rc):
     server_connected = 0
     # client.reconnect()
 
+def on_publish(client, userdata, mid):
+    global pub_pending_times
+    if pub_pending_times > 0:
+        pub_pending_times = pub_pending_times - 1
+
 def timer_publish_trigger():
     # print "triggered"
     threading.Timer(MQTT_PUBLISH_PERIOD, timer_publish_trigger).start()
@@ -56,25 +63,30 @@ def timer_publish_trigger():
 def sensor_loop():
     global timer_publish_triggered
     global server_connected
+    global pub_pending_times
     timer_publish_trigger()
     COUNT_PER_1S = 1
     count_for_1s = 0
+    pub_pending_times = 0
     # adxl.flash_fifo()
     print "sending %d" % server_connected
     while server_connected == 1:
         if timer_publish_triggered == 1:
             timer_publish_triggered = 0
+            if pub_pending_times > 10:
+                break;
             count_for_1s = count_for_1s + 1
             # every 1.0 s
             if count_for_1s >= COUNT_PER_1S:
                 count_for_1s = 0
-                # upload sht             
+                # upload sht
                 try:
                     temp,humid,timestamp = sht30.read_periodic()
                     # print (temp,humid,timestamp)
                     if timestamp !=0:
                         payload = '{"mac":"%s","ts":%d,"c_temp":%.2f,"c_humid":%.2f}' % (mac,timestamp,temp,humid);
                         client.publish("tddt/rpi/rpi-001/s_temp_humid",payload)
+                        pub_pending_times = pub_pending_times + 1
                         # print payload
                     else:
                         logging.error("no sht3x data")
@@ -88,6 +100,7 @@ def sensor_loop():
                     timestamp = int(time.time()*1e9)
                     payload = '{"mac":"%s","ts":%d,"c_human_detected":%d}' % (mac,timestamp,human_detected);
                     client.publish("tddt/rpi/rpi-001/s_human",payload)
+                    pub_pending_times = pub_pending_times + 1
                 except Exception, e:
                     print e
                     logging.error(e)
@@ -107,7 +120,7 @@ def sensor_loop():
 
 
 if __name__ == "__main__":
-    
+
     # arguments
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', type=str, default="localhost")
@@ -117,7 +130,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     logging.basicConfig(filename='sensorPi_internal.log',level=logging.DEBUG,format='%(asctime)s  %(message)s')
-    
+
     logging.info(args)
 
     sht30 = SHT30.Sht30()
@@ -141,15 +154,15 @@ if __name__ == "__main__":
     # if len(sys.argv) > 1:
     #     interface = sys.argv[1]
     # else:
-    #     interface = 'wlan0'   
-    # wifi_scan_result = [[cell.signal, cell.ssid, cell.address] for cell in Cell.all(interface)] 
+    #     interface = 'wlan0'
+    # wifi_scan_result = [[cell.signal, cell.ssid, cell.address] for cell in Cell.all(interface)]
     # countdown_1min=2
 
     while 1:
         try:
             print "try connecting..."
             logging.info("Try connecting to server...")
-            client.connect(args.host, args.port, 10)            
+            client.connect(args.host, args.port, 10)
             # client.loop_start()
             time.sleep(2)
             sensor_loop()
