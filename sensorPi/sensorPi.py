@@ -60,7 +60,7 @@ def timer_publish_trigger():
     global timer_publish_triggered
     timer_publish_triggered = 1
 
-def sensor_loop():
+def sensor_loop(args):
     global timer_publish_triggered
     global server_connected
     global pub_pending_times
@@ -70,8 +70,9 @@ def sensor_loop():
     pub_pending_times = 0
     # adxl.flash_fifo()
     print "sending %d" % server_connected
-    while server_connected == 1:
-        if timer_publish_triggered == 1:
+    topic_prefix = 'tddt/' + args.nodeType + '/' + args.nodeName
+    while server_connected:
+        if timer_publish_triggered:
             timer_publish_triggered = 0
             if pub_pending_times > 10:
                 break;
@@ -83,9 +84,9 @@ def sensor_loop():
                 try:
                     temp,humid,timestamp = sht30.read_periodic()
                     # print (temp,humid,timestamp)
-                    if timestamp !=0:
+                    if timestamp != 0:
                         payload = '{"mac":"%s","ts":%d,"c_temp":%.2f,"c_humid":%.2f}' % (mac,timestamp,temp,humid);
-                        client.publish("tddt/rpi/rpi-001/s_temp_humid",payload)
+                        client.publish(topic_prefix + '/s_temp_humid',payload)
                         pub_pending_times = pub_pending_times + 1
                         # print payload
                     else:
@@ -99,7 +100,7 @@ def sensor_loop():
                     human_detected = GPIO.input(12)
                     timestamp = int(time.time()*1e9)
                     payload = '{"mac":"%s","ts":%d,"c_human_detected":%d}' % (mac,timestamp,human_detected);
-                    client.publish("tddt/rpi/rpi-001/s_human",payload)
+                    client.publish(topic_prefix + '/s_human',payload)
                     pub_pending_times = pub_pending_times + 1
                 except Exception, e:
                     print e
@@ -118,6 +119,7 @@ def sensor_loop():
         else:
             time.sleep(0.001)
 
+    print "end of loop"
 
 if __name__ == "__main__":
 
@@ -127,6 +129,8 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=1883)
     parser.add_argument('--username', type=str, default=None)
     parser.add_argument('--password', type=str, default=None)
+    parser.add_argument('--nodeType', type=str, default='rpi')
+    parser.add_argument('--nodeName', type=str, default='rpi-001')
     args = parser.parse_args()
 
     logging.basicConfig(filename='sensorPi_internal.log',level=logging.DEBUG,format='%(asctime)s  %(message)s')
@@ -144,13 +148,7 @@ if __name__ == "__main__":
     mac=uuid.UUID(int = uuid.getnode()).hex[-12:]
     logging.info("MAC:"+ mac)
 
-    client = mqtt.Client()
-    client.on_connect = on_connect
-    client.on_disconnect = on_disconnect
-    if args.username != None:
-        client.username_pw_set(args.username, args.password)
-    client.loop_start()
-
+    client=mqtt.Client()
     # if len(sys.argv) > 1:
     #     interface = sys.argv[1]
     # else:
@@ -159,13 +157,22 @@ if __name__ == "__main__":
     # countdown_1min=2
 
     while 1:
-        try:
+	try:
+            client.reinitialise() 
+    	    client.on_connect = on_connect
+            client.on_disconnect = on_disconnect
+            client.on_publish = on_publish
+            if args.username != None:
+                client.username_pw_set(args.username, args.password)
+            client.loop_start()
+
             print "try connecting..."
             logging.info("Try connecting to server...")
             client.connect(args.host, args.port, 10)
             # client.loop_start()
             time.sleep(2)
-            sensor_loop()
+            sensor_loop(args)
+            client.loop_stop()
         except Exception,e:
             print e
             logging.error(e)
